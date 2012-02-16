@@ -1,10 +1,8 @@
 var http = require('http'),
-	querystring = require('querystring'),
 	url = require('url');
 	async = require('async');
 
 http.createServer(function(request, response) {
-	//res.writeHead(200, {'Content-Type': 'text/plain'});
 	var query = url.parse(request.url).query,
 		ids = [ ],
 		urls = { }
@@ -43,28 +41,26 @@ http.createServer(function(request, response) {
 		if(err)
 			return;
 			
-		result = { };
+		result = { players: [ ] };
 			
 		idsUpdate.forEach(function(id) {
 			var curResult = results[id];
 			
 			if(!curResult)
 				return;
-			//console.log(curResult.data.summary.wins)
-			result[id] = { };
 			
+			resultItem = { id: id };
+			// TODO default response on all errors
 			if(curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
                 var data = curResult.data,
 					summary = data.summary,
 					battlesCount = summary.battles_count,
 					tankLvl = { };
                 
-                result[id].name = data.name;
-                if(battlesCount !== 0) {
-                    result[id].win = Math.round(summary.wins * 100 / battlesCount, 0);
-                } else {
-                    result[id].win = 0;
-                }
+                resultItem.name = data.name;
+				resultItem.battles = battlesCount;
+				resultItem.wins = summary.wins;
+                
                 tankLvl.battle_count = 0;
                 for(var i = 1; i <= 10; i++) {
                     tankLvl[i] = { battle_count: 0 };
@@ -87,23 +83,21 @@ http.createServer(function(request, response) {
                     effect.det = battles.spotted / battlesCount;
                     effect.cap = battles.capture_points / battlesCount;
                     effect.def = battles.dropped_capture_points / battlesCount;
-                    result[id].eff = Math.round((effect.dmg * (10 / mid) * (0.15 + mid / 50) + effect.des * (0.35 - mid / 50)
+                    resultItem.eff = Math.round((effect.dmg * (10 / mid) * (0.15 + mid / 50) + effect.des * (0.35 - mid / 50)
                                                 * 1000 + effect.det * 200 + effect.cap * 150 + effect.def * 150) / 10, 0) * 10;
                 } else {
-                    result[id].eff = 0;
+                    resultItem.eff = 0;
                 }
             } else {
-                result[id].eff = "X";
-                result[id].win = "X";
+                resultItem.eff = "X";
+                resultItem.win = "X";
             }
+			result.players.push(resultItem);
 		});
 		
-		//console.log(result);
 		response.end(JSON.stringify(result));
 	});
 	
-	//response.end(ids.join(","));
-	//res.end(querystring.stringify(urls));
 }).listen(1337, "127.0.0.1");
 
 console.log('Server running at http://127.0.0.1:1337/');

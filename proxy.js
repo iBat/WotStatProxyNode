@@ -98,10 +98,11 @@ http.createServer(function(request, response) {
             }
 		});
 		
-		console.log(result);
+		//console.log(result);
+		response.end(JSON.stringify(result));
 	});
 	
-	response.end(ids.join(","));
+	//response.end(ids.join(","));
 	//res.end(querystring.stringify(urls));
 }).listen(1337, "127.0.0.1");
 

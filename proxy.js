@@ -49,7 +49,7 @@ http.createServer(function(request, response) {
 			if(!curResult)
 				return;
 			
-			resultItem = { id: id };
+			resultItem = { id: parseInt(id) };
 			// TODO default response on all errors
 			if(curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
                 var data = curResult.data,

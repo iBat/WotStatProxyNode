@@ -24,8 +24,6 @@ http.createServer(function(request, response) {
 	var processRemotes = function() {
 		var urls = { };
 		
-		console.log(idsUpdate);
-		
 		for(var id in idsUpdate) {
 			if(idsUpdate[id]) {
 				urls[idsUpdate[id]] = (function(id) {
@@ -35,8 +33,6 @@ http.createServer(function(request, response) {
 							port: 80,
 							path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
 						};
-						
-						console.log(options.path);
 
 						http.get(options, function(res) {
 							var responseData = "";
@@ -68,7 +64,7 @@ http.createServer(function(request, response) {
 					if(!curResult)
 						return;
 					
-					resultItem = { id: id };
+					resultItem = { id: idsUpdate[id] };
 					// TODO default response on all errors
 					if(curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
 						var data = curResult.data,
@@ -142,10 +138,11 @@ http.createServer(function(request, response) {
 			
 		var collection = new mongo.Collection(client, collectionName),
 			checks = [ ];
+			
 		for(var id in ids) {
 			checks.push((function(id) {
 				return function(callback) {
-					collection.find({ id: String(id) }, { limit: 1 }).toArray(function(err, docs) {
+					collection.find({ id: ids[id] }, { limit: 1 }).toArray(function(err, docs) {
 						if(docs.length) {
 							idsCache[id] = docs[0];
 							idsUpdate[id] = undefined;

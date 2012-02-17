@@ -27,37 +27,38 @@ http.createServer(function(request, response) {
 		console.log(idsUpdate);
 		
 		for(var id in idsUpdate) {
-			var curId = idsUpdate[id];
-			if(curId) {
-				urls[curId] = function(callback) {
-					var options = {
-						host: "worldoftanks.ru",
-						port: 80,
-						path: "/uc/accounts/" + curId + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
-					};
-					
-					console.log(options.path);
+			if(idsUpdate[id]) {
+				urls[idsUpdate[id]] = (function(id) {
+					return function(callback) {
+						var options = {
+							host: "worldoftanks.ru",
+							port: 80,
+							path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
+						};
+						
+						console.log(options.path);
 
-					http.get(options, function(res) {
-						var responseData = "";
-						res.setEncoding("utf8");
-						res.on("data", function(chunk) {
-							responseData += chunk;
+						http.get(options, function(res) {
+							var responseData = "";
+							res.setEncoding("utf8");
+							res.on("data", function(chunk) {
+								responseData += chunk;
+							});
+							res.on("end", function() {
+								callback(null, JSON.parse(responseData));
+							});
+						}).on("error", function(e) {
+							callback(e);
 						});
-						res.on("end", function() {
-							callback(null, JSON.parse(responseData));
-						});
-					}).on("error", function(e) {
-						callback(e);
-					});
-				};
+					};
+				})(id);
 			}
 		}
 		
 		async.series(urls, function(err, results) {
 			if(err)
 				return;
-				
+			
 			result = { players: [ ] };
 			
 			for(var id in idsUpdate) {
@@ -114,16 +115,18 @@ http.createServer(function(request, response) {
 				}
 			}
 			
-			db.open(function(error, client) {
-				if(error)
-					throw error;
-				
-				var collection = new mongo.Collection(client, collectionName);
-				
-				result.players.forEach(function(player) {
-					collection.update({ id: player.id }, player, { upsert: true });
-				});
-			});
+			db.open((function(updates) {
+				return function(error, client) {
+					if(error)
+						throw error;
+					
+					var collection = new mongo.Collection(client, collectionName);
+					
+					updates.forEach(function(player) {
+						collection.update({ id: player.id }, player, { upsert: true });
+					});
+				};
+			})(result.players));
 			
 			for(var id in idsCache) {
 				result.players.push(idsCache[id]);
@@ -140,15 +143,17 @@ http.createServer(function(request, response) {
 		var collection = new mongo.Collection(client, collectionName),
 			checks = [ ];
 		for(var id in ids) {
-			checks.push(function(callback) {
-				collection.find({ id: id }, { limit: 1 }).toArray(function(err, docs) {
-					if(docs.length) {
-						idsCache[id] = docs[0];
-						idsUpdate[id] = undefined;
-					}
-					callback(null);
-				});
-			});
+			checks.push((function(id) {
+				return function(callback) {
+					collection.find({ id: String(id) }, { limit: 1 }).toArray(function(err, docs) {
+						if(docs.length) {
+							idsCache[id] = docs[0];
+							idsUpdate[id] = undefined;
+						}
+						callback(null);
+					});
+				}
+			})(id));
 		}
 		// TODO parallel?
 		async.series(checks, function(err, results) {

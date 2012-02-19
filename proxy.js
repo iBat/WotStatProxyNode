@@ -3,7 +3,8 @@ var http = require("http"),
 	async = require("async"),
 	mongo = require("mongodb"),
 	dbName = "test",
-	collectionName = "test_collection";
+	collectionName = "test_collection",
+    cacheTtl = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 http.createServer(function(request, response) {
 	var query = url.parse(request.url).query,
@@ -99,6 +100,7 @@ http.createServer(function(request, response) {
 						resultItem.eff = "X";
 						resultItem.win = "X";
 					}
+                    resultItem.date = new Date();
 					result.players.push(resultItem);
 				}
 			}
@@ -149,8 +151,10 @@ http.createServer(function(request, response) {
 		for(var id in ids) {
 			checks.push((function(id) {
 				return function(callback) {
+                    var now = new Date();
 					collection.find({ id: ids[id] }, { limit: 1 }).toArray(function(err, docs) {
-						if(docs.length) {
+                        // TODO try no hashs. Just 2 arrays: inCache[], forUpdate[].
+						if(docs.length && (now - docs[0].date) < cacheTtl) {
 							idsCache[id] = docs[0];
 							idsUpdate[id] = undefined;
 						}

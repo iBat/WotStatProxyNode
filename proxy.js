@@ -7,17 +7,10 @@ var http = require("http"),
 
 http.createServer(function(request, response) {
 	var query = url.parse(request.url).query,
-		db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, {})),
+		db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, { })),
 		ids = { },
 		result = { };
-	// TODO correct quit if no queries
-	if(query) {
-		parts = query.split(",");
-		parts.forEach(function(part) {
-			ids[part]=parseInt(part);
-		});
-	}
-		
+	
 	var idsCache = { },
 		idsUpdate = ids;
 	
@@ -52,21 +45,20 @@ http.createServer(function(request, response) {
 		}
 		
 		async.series(urls, function(err, results) {
-			if(err)
+			if(err) {
+				response.statusCode = 500;
+				response.end("Error while processing stats from WG servers.");
 				return;
+			}
 			
 			result = { players: [ ] };
 			
 			for(var id in idsUpdate) {
 				if(idsUpdate[id]) {
-					var curResult = results[id];
-					// TODO fix me
-					if(!curResult)
-						return;
+					var curResult = results[id],
+						resultItem = { id: idsUpdate[id] };
 					
-					resultItem = { id: idsUpdate[id] };
-					// TODO default response on all errors
-					if(curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
+					if(curResult && curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
 						var data = curResult.data,
 							summary = data.summary,
 							battlesCount = summary.battles_count,
@@ -119,7 +111,8 @@ http.createServer(function(request, response) {
 					var collection = new mongo.Collection(client, collectionName);
 					
 					updates.forEach(function(player) {
-						collection.update({ id: player.id }, player, { upsert: true });
+                        if(player.eff !== "X")
+						    collection.update({ id: player.id }, player, { upsert: true });
 					});
 				};
 			})(result.players));
@@ -132,9 +125,23 @@ http.createServer(function(request, response) {
 		});
 	};
 	
+	if(query && query.match(/^\d(\d|,)+\d$/)) {
+		parts = query.split(",");
+		parts.forEach(function(part) {
+			ids[part]=parseInt(part);
+		});
+	} else {
+		response.statusCode = 500;
+		response.end("wrong request");
+		return;
+	}
+	
 	db.open(function(error, client) {
-		if(error)
-			throw error;
+		if(error) {
+			response.statusCode = 500;
+			response.end("DB connection error");
+			return;
+		}
 			
 		var collection = new mongo.Collection(client, collectionName),
 			checks = [ ];
@@ -152,7 +159,7 @@ http.createServer(function(request, response) {
 				}
 			})(id));
 		}
-		// TODO parallel?
+		
 		async.series(checks, function(err, results) {
 			processRemotes();
 		});

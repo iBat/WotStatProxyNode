@@ -126,7 +126,7 @@ http.createServer(function(request, response) {
 	};
 	
 	if(query && query.match(/^\d(\d|,)+\d$/)) {
-		parts = query.split(",");
+		var parts = query.split(",");
 		parts.forEach(function(part) {
 			ids[part]=parseInt(part);
 		});
@@ -156,7 +156,7 @@ http.createServer(function(request, response) {
 						}
 						callback(null);
 					});
-				}
+				};
 			})(id));
 		}
 		

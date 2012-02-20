@@ -54,13 +54,12 @@ http.createServer(function(request, response) {
 			
 			result = { 
 				players: [ ],
-				info: [
-					{
-						name: "xvm",
+				info: {
+					xvm: {
 						ver: "0.4",
 						message: "\u00bd + \u00bc = \u00be"
 					}
-				]
+				}
 			};
 			
 			for(var id in idsUpdate) {

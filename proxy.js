@@ -52,7 +52,15 @@ http.createServer(function(request, response) {
 				return;
 			}
 			
-			result = { players: [ ] };
+			result = { 
+				players: [ ],
+				info: {
+					xvm: {
+						ver: "0.4",
+						message: "\u00bd + \u00bc = \u00be"
+					}
+				}
+			};
 			
 			for(var id in idsUpdate) {
 				if(idsUpdate[id]) {

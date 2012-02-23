@@ -8,12 +8,20 @@ var http = require("http"),
 
 http.createServer(function(request, response) {
 	var query = url.parse(request.url).query,
-		db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, { })),
+		db,
 		ids = [ ],
-		result = { };
-	
-	var inCache = [ ],
+		result = { },
+        inCache = [ ],
 		forUpdate = [ ];
+
+    try {
+        db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, { }));
+    } catch(e) {
+        response.statusCode = 500;
+        response.end("DB connection error");
+        console.log("DB connection error 1");
+        return;
+    }
 	
 	var processRemotes = function() {
 		var urls = { };
@@ -147,6 +155,7 @@ http.createServer(function(request, response) {
 	} else {
 		response.statusCode = 500;
 		response.end("wrong request");
+        console.log("wrong request");
 		return;
 	}
 	
@@ -154,6 +163,7 @@ http.createServer(function(request, response) {
 		if(error) {
 			response.statusCode = 500;
 			response.end("DB connection error");
+            console.log("DB connection error 2");
 			return;
 		}
 			
@@ -183,6 +193,7 @@ http.createServer(function(request, response) {
             if(error) {
                 response.statusCode = 500;
                 response.end("DB connection error");
+                console.log("DB connection error 3");
                 return;
             }
 			processRemotes();

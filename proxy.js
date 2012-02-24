@@ -1,27 +1,22 @@
 var http = require("http"),
 	url = require("url"),
 	async = require("async"),
-	mongo = require("mongodb"),
 	dbName = "test",
 	collectionName = "test_collection",
-    cacheTtl = 7 * 24 * 60 * 60 * 1000; // 7 days
+    cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
+    mongo = require("mongodb"),
+    serverOptions = {
+        auto_reconnect: true,
+        poolSize: 10
+    },
+    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions));
 
 http.createServer(function(request, response) {
 	var query = url.parse(request.url).query,
-		db,
 		ids = [ ],
 		result = { },
         inCache = [ ],
 		forUpdate = [ ];
-
-    try {
-        db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, { }));
-    } catch(e) {
-        response.statusCode = 500;
-        response.end("DB connection error");
-        console.log("DB connection error 1");
-        return;
-    }
 	
 	var processRemotes = function() {
 		var urls = { };

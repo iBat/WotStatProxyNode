@@ -9,7 +9,19 @@ var http = require("http"),
         auto_reconnect: true,
         poolSize: 10
     },
-    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions));
+    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
+    collection;
+
+db.open(function(error, client) {
+		if(error) {
+			response.statusCode = 500;
+			response.end("DB connection error");
+            console.log("DB connection error!");
+			return;
+		}
+
+		collection = new mongo.Collection(client, collectionName);
+});
 
 http.createServer(function(request, response) {
 	var query = url.parse(request.url).query,
@@ -116,23 +128,11 @@ http.createServer(function(request, response) {
                 resultItem.date = now;
                 result.players.push(resultItem);
 		    });
-			
-			db.open((function(updates) {
-				return function(error, client) {
-					if(error) {
-                        response.statusCode = 500;
-                        response.end("wrong request");
-                        return;
-                    }
-					
-					var collection = new mongo.Collection(client, collectionName);
-					
-					updates.forEach(function(player) {
-                        if(player.eff !== "X")
-						    collection.update({ id: player.id }, player, { upsert: true });
-					});
-				};
-			})(result.players));
+
+            result.players.forEach(function(player) {
+                if(player.eff !== "X")
+                    collection.update({ id: player.id }, player, { upsert: true });
+            });
 			
             inCache.forEach(function(player) {
 				result.players.push(player);
@@ -153,47 +153,37 @@ http.createServer(function(request, response) {
         console.log("wrong request");
 		return;
 	}
-	
-	db.open(function(error, client) {
-		if(error) {
-			response.statusCode = 500;
-			response.end("DB connection error");
-            console.log("DB connection error 2");
-			return;
-		}
-			
-		var collection = new mongo.Collection(client, collectionName),
-			checks = [ ],
-            now = new Date();
 
-        ids.forEach(function(id) {
-			checks.push(function(callback) {
-                collection.find({ id: id }, { limit: 1 }).toArray(function(error, docs) {
-                    if(error) {
-                        callback(error);
-                        return;
-                    }
-                    // TODO check if exception possible
-                    if(docs.length && (now - docs[0].date) < cacheTtl)
-                        inCache.push(docs[0]);
-                    else
-                        forUpdate.push(id);
+    var checks = [ ],
+        now = new Date();
 
-                    callback(null);
-                });
+    ids.forEach(function(id) {
+        checks.push(function(callback) {
+            collection.find({ id: id }, { limit: 1 }).toArray(function(error, docs) {
+                if(error) {
+                    callback(error);
+                    return;
+                }
+                // TODO check if exception possible
+                if(docs.length && (now - docs[0].date) < cacheTtl)
+                    inCache.push(docs[0]);
+                else
+                    forUpdate.push(id);
+
+                callback(null);
             });
-		});
-		
-		async.series(checks, function(error, results) {
-            if(error) {
-                response.statusCode = 500;
-                response.end("DB connection error");
-                console.log("DB connection error 3");
-                return;
-            }
-			processRemotes();
-		});
-	});
+        });
+    });
+
+    async.series(checks, function(error, results) {
+        if(error) {
+            response.statusCode = 500;
+            response.end("DB connection error");
+            console.log("DB connection error 3");
+            return;
+        }
+        processRemotes();
+    });
 	
 }).listen(1337, "127.0.0.1");
 

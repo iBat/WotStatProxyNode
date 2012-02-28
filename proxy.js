@@ -13,22 +13,33 @@ var http = require("http"),
     collection;
 
 db.open(function(error, client) {
-		if(error) {
-			response.statusCode = 500;
-			response.end("DB connection error");
-            console.log("DB connection error!");
-			return;
-		}
+    if(error) {
+        response.statusCode = 500;
+        response.end("DB connection error");
+        console.log("DB connection error!");
+        return;
+    }
 
-		collection = new mongo.Collection(client, collectionName);
+    collection = new mongo.Collection(client, collectionName);
 });
 
 http.createServer(function(request, response) {
-	var query = url.parse(request.url).query,
+	var query,
 		ids = [ ],
 		result = { },
         inCache = [ ],
 		forUpdate = [ ];
+
+    try {
+        query = url.parse(request.url).query;
+    } catch(e) {
+        console.log(e);
+        console.log(request.url);
+        response.statusCode = 500;
+        response.end("wrong request");
+        console.log("wrong request");
+        return;
+    }
 	
 	var processRemotes = function() {
 		var urls = { };

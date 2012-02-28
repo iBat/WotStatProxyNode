@@ -59,7 +59,15 @@ http.createServer(function(request, response) {
                         responseData += chunk;
                     });
                     res.on("end", function() {
-                        callback(null, JSON.parse(responseData));
+                        var result;
+                        try {
+                            result = JSON.parse(responseData);
+                        } catch (e) {
+                            console.log(e);
+                            console.log(responseData);
+                            callback(e);
+                        }
+                        callback(null, result);
                     });
                 }).on("error", function(e) {
                     callback(e);

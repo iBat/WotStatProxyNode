@@ -12,10 +12,10 @@ var http = require("http"),
     db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
     collection;
 
+process.setMaxListeners(0);
+
 db.open(function(error, client) {
     if(error) {
-        response.statusCode = 500;
-        response.end("DB connection error");
         console.log("DB connection error!");
         return;
     }
@@ -78,12 +78,6 @@ http.createServer(function(request, response) {
 		});
 		
 		async.series(urls, function(err, results) {
-			if(err) {
-				response.statusCode = 500;
-				response.end("Error while processing stats from WG servers.");
-				return;
-			}
-			
 			result = { 
 				players: [ ],
 				info: {

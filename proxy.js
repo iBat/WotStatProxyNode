@@ -42,7 +42,7 @@ var processRemotes = function(inCache, forUpdate, response) {
                 path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
             };
 
-            http.get(options, function(res) {
+            var request = http.get(options, function(res) {
                 var responseData = "";
 
                 res.setEncoding("utf8");
@@ -61,11 +61,16 @@ var processRemotes = function(inCache, forUpdate, response) {
                     }
                     callback(null, result);
                 });
-            }).on("error", function(e) {
+            });
+
+            request.on("error", function(e) {
                 console.log("Http error");
                 callback(e);
-            }).setTimeout(5000, function() {
+            });
+            request.setTimeout(5000, function() {
                 console.log("Timeout");
+                request.abort();
+                console.log("Request aborted");
                 callback("Timeout");
             });
         };

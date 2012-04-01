@@ -1,10 +1,11 @@
 var http = require("http"),
 	url = require("url"),
 	async = require("async"),
-	dbName = "test",
+    utils = require("./utils"),
+    mongo = require("mongodb"),
+    dbName = "test",
 	collectionName = "test_collection",
     cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
-    mongo = require("mongodb"),
     serverOptions = {
         auto_reconnect: true,
         poolSize: 10
@@ -23,163 +24,142 @@ db.open(function(error, client) {
     collection = new mongo.Collection(client, collectionName);
 });
 
-http.createServer(function(request, response) {
-	var query,
-		ids = [ ],
-		result = { },
-        inCache = [ ],
-		forUpdate = [ ];
+var updateDb = function(players) {
+    players.forEach(function(player) {
+        if(player.eff !== "X")
+            collection.update({ id: player.id }, player, { upsert: true });
+    });
+};
+
+var processRemotes = function(inCache, forUpdate, response) {
+    var urls = { };
+
+    forUpdate.forEach(function(id) {
+        urls[id] = function(callback) {
+            var options = {
+                host: "worldoftanks.ru",
+                port: 80,
+                path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
+            };
+
+            http.get(options, function(res) {
+                var responseData = "";
+
+                res.setEncoding("utf8");
+                res.on("data", function(chunk) {
+                    responseData += chunk;
+                });
+                res.on("end", function() {
+                    var result;
+
+                    try {
+                        result = JSON.parse(responseData);
+                    } catch(e) {
+                        console.log(e);
+                        console.log("JSON.parse error: " + responseData);
+                        callback(e);
+                    }
+                    callback(null, result);
+                });
+            }).on("error", function(e) {
+                callback(e);
+            }).setTimeout(5000, function() {
+                callback("Timeout");
+            });
+        };
+    });
+
+    async.series(urls, function(err, results) {
+        var result = {
+            players: [ ],
+            info: {
+                xvm: {
+                    ver: "0.4",
+                    message: "\u00bd + \u00bc = \u00be"
+                }
+            }
+        };
+
+        var now = new Date();
+
+        forUpdate.forEach(function(id) {
+            var curResult = results[id],
+                resultItem = { id: id };
+
+            if(curResult && curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
+                resultItem.name = curResult.data.name;
+                resultItem.battles = curResult.data.summary.battles_count;
+                resultItem.wins = curResult.data.summary.wins;
+                resultItem.eff = utils.calculateEfficiency(curResult.data);
+            } else {
+                resultItem.eff = "X";
+                resultItem.win = "X";
+            }
+            resultItem.date = now;
+            result.players.push(resultItem);
+        });
+
+        updateDb(result.players);
+
+        inCache.forEach(function(player) {
+            result.players.push(player);
+        });
+
+        response.end(JSON.stringify(result));
+    });
+};
+
+var getQuery = function(request, response) {
+    var query;
 
     try {
         query = url.parse(request.url).query;
     } catch(e) {
-        console.log(e);
-        console.log(request.url);
         response.statusCode = 500;
         response.end("wrong request");
-        console.log("wrong request");
-        return;
+        console.log("url.parse error: " + request.url);
+        return false;
     }
-	
-	var processRemotes = function() {
-		var urls = { };
-		
-        forUpdate.forEach(function(id) {
-            urls[id] = function(callback) {
-                var options = {
-                    host: "worldoftanks.ru",
-                    port: 80,
-                    path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
-                };
 
-                http.get(options, function(res) {
-                    var responseData = "";
-                    res.setEncoding("utf8");
-                    res.on("data", function(chunk) {
-                        responseData += chunk;
-                    });
-                    res.on("end", function() {
-                        var result;
-                        try {
-                            result = JSON.parse(responseData);
-                        } catch (e) {
-                            console.log(e);
-                            console.log(responseData);
-                            callback(e);
-                        }
-                        callback(null, result);
-                    });
-                }).on("error", function(e) {
-                    callback(e);
-                }).setTimeout(5000, function() {
-                    callback("Timeout");
-                });
-            };
-		});
-		
-		async.series(urls, function(err, results) {
-			result = { 
-				players: [ ],
-				info: {
-					xvm: {
-						ver: "0.4",
-						message: "\u00bd + \u00bc = \u00be"
-					}
-				}
-			};
+    if(!(query && query.match(/^\d(\d|,)+\d$/))) {
+        response.statusCode = 500;
+        response.end("wrong request");
+        console.log("query match error: " + query);
+        return false;
+    }
 
-            var now = new Date();
-			
-            forUpdate.forEach(function(id) {
-                var curResult = results[id],
-                    resultItem = { id: id };
+    return query;
+};
 
-                if(curResult && curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
-                    var data = curResult.data,
-                        summary = data.summary,
-                        battlesCount = summary.battles_count,
-                        tankLvl = { };
+http.createServer(function(request, response) {
+	var query = getQuery(request, response);
 
-                    resultItem.name = data.name;
-                    resultItem.battles = battlesCount;
-                    resultItem.wins = summary.wins;
+    if(!query)
+        return;
 
-                    tankLvl.battle_count = 0;
-
-                    var i;
-
-                    for(i = 1; i <= 10; i++) {
-                        tankLvl[i] = { battle_count: 0 };
-                    }
-                    data.vehicles.forEach(function(item) {
-                        tankLvl[item.level].battle_count += item.battle_count;
-                        tankLvl.battle_count += item.battle_count;
-                    });
-
-                    var mid = 0;
-
-                    for(i = 1; i <= 10; i++) {
-                        mid +=  i * tankLvl[i].battle_count / tankLvl.battle_count;
-                    }
-                    var effect = { };
-                    if(battlesCount !== 0) {
-                        var battles = data.battles;
-                        effect.dmg = battles.damage_dealt / battlesCount;
-                        effect.des = battles.frags / battlesCount;
-                        effect.det = battles.spotted / battlesCount;
-                        effect.cap = battles.capture_points / battlesCount;
-                        effect.def = battles.dropped_capture_points / battlesCount;
-                        resultItem.eff = Math.round((effect.dmg * (10 / mid) * (0.15 + mid / 50) + effect.des * (0.35 - mid / 50)
-                                                    * 1000 + effect.det * 200 + effect.cap * 150 + effect.def * 150) / 10, 0) * 10;
-                    } else {
-                        resultItem.eff = 0;
-                    }
-                } else {
-                    resultItem.eff = "X";
-                    resultItem.win = "X";
-                }
-                resultItem.date = now;
-                result.players.push(resultItem);
-		    });
-
-            result.players.forEach(function(player) {
-                if(player.eff !== "X")
-                    collection.update({ id: player.id }, player, { upsert: true });
-            });
-			
-            inCache.forEach(function(player) {
-				result.players.push(player);
-			});
-			
-			response.end(JSON.stringify(result));
-		});
-	};
-	
-	if(query && query.match(/^\d(\d|,)+\d$/)) {
-		var parts = query.split(",");
-		parts.forEach(function(part) {
-			ids.push(parseInt(part));
-		});
-	} else {
-		response.statusCode = 500;
-		response.end("wrong request");
-        console.log("wrong request");
-		return;
-	}
-
-    var checks = [ ],
+    var ids = [ ],
+        inCache = [ ],
+        forUpdate = [ ],
+        parts = query.split(","),
+        checks = [ ],
         now = new Date();
+
+    parts.forEach(function(part) {
+        ids.push(parseInt(part));
+    });
 
     ids.forEach(function(id) {
         checks.push(function(callback) {
-            collection.find({ id: id }, { limit: 1 }).toArray(function(error, docs) {
+            collection.find({ id: id }, { limit: 1 }).toArray(function(error, records) {
                 if(error) {
                     callback(error);
                     return;
                 }
-                // TODO check if exception possible
-                if(docs.length && (now - docs[0].date) < cacheTtl)
-                    inCache.push(docs[0]);
+
+                var playerRecord = records.length && records[0];
+
+                if(playerRecord && (now - playerRecord.date) < cacheTtl)
+                    inCache.push(playerRecord);
                 else
                     forUpdate.push(id);
 
@@ -188,16 +168,16 @@ http.createServer(function(request, response) {
         });
     });
 
-    async.series(checks, function(error, results) {
+    async.series(checks, function(error) {
         if(error) {
             response.statusCode = 500;
             response.end("DB connection error");
             console.log("DB connection error 3");
             return;
         }
-        processRemotes();
+        processRemotes(inCache, forUpdate, response);
     });
 	
 }).listen(1337, "127.0.0.1");
 
-console.log('Server running at http://127.0.0.1:1337/');
+console.log("Server running at http://127.0.0.1:1337/");

@@ -69,7 +69,7 @@ var processRemotes = function(inCache, forUpdate, response) {
             });
             request.setTimeout(5000, function() {
                 console.log("Timeout");
-                request.abort();
+                callback("Timeout");
             });
         };
     });

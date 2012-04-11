@@ -13,11 +13,9 @@ var http = require("http"),
     db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
     collection;
 
-process.setMaxListeners(0);
-
 db.open(function(error, client) {
     if(error) {
-        console.log("DB connection error!");
+        utils.log("DB connection error!");
         return;
     }
 
@@ -39,10 +37,11 @@ var processRemotes = function(inCache, forUpdate, response) {
             var options = {
                 host: "worldoftanks.ru",
                 port: 80,
-                path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
+                path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats",
+                method: "GET"
             };
 
-            var request = http.get(options, function(res) {
+            var request = http.request(options, function(res) {
                 var responseData = "";
 
                 res.setEncoding("utf8");
@@ -51,12 +50,11 @@ var processRemotes = function(inCache, forUpdate, response) {
                 });
                 res.on("end", function() {
                     var result;
-
                     try {
                         result = JSON.parse(responseData);
                     } catch(e) {
-                        console.log(e);
-                        console.log("JSON.parse error: " + responseData);
+                        utils.log(e);
+                        utils.log("JSON.parse error: " + responseData);
                         callback(e);
                     }
                     callback(null, result);
@@ -64,14 +62,18 @@ var processRemotes = function(inCache, forUpdate, response) {
             });
 
             request.on("error", function(e) {
-                console.log("Http error: " + e);
+                utils.log("Http error: " + e);
                 callback(e);
             });
-            request.setTimeout(2500, function() {
-                console.log("Timeout");
+            request.setTimeout(2000);
+            request.on("timeout",  function() {
+                debugger;
+                utils.log("Timeout");
                 request.destroy();
                 callback(true);
             });
+            request.shouldKeepAlive = false;
+            request.end();
         };
     });
 
@@ -85,7 +87,7 @@ var processRemotes = function(inCache, forUpdate, response) {
                 }
             }
         };
-
+        
         var now = new Date();
 
         forUpdate.forEach(function(id) {
@@ -123,14 +125,14 @@ var getQuery = function(request, response) {
     } catch(e) {
         response.statusCode = 500;
         response.end("wrong request");
-        console.log("url.parse error: " + request.url);
+        utils.log("url.parse error: " + request.url);
         return false;
     }
 
     if(!(query && query.match(/^\d(\d|,)+\d$/))) {
         response.statusCode = 500;
         response.end("wrong request");
-        console.log("query match error: " + query);
+        utils.log("query match error: " + query);
         return false;
     }
 
@@ -178,7 +180,7 @@ http.createServer(function(request, response) {
         if(error) {
             response.statusCode = 500;
             response.end("DB connection error");
-            console.log("DB connection error 3");
+            utils.log("DB connection error 3");
             return;
         }
         processRemotes(inCache, forUpdate, response);
@@ -186,4 +188,4 @@ http.createServer(function(request, response) {
 	
 }).listen(1337, "127.0.0.1");
 
-console.log("Server running at http://127.0.0.1:1337/");
+utils.log("Server running at http://127.0.0.1:1337/");

@@ -65,9 +65,9 @@ var processRemotes = function(inCache, forUpdate, response) {
 
             request.on("error", function(e) {
                 console.log("Http error: " + e);
-                callback(e);
+                callback(true);
             });
-            request.setTimeout(2500, function() {
+            request.setTimeout(2000, function() {
                 console.log("Timeout");
                 request.destroy();
                 callback(true);

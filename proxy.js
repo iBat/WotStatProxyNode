@@ -37,11 +37,10 @@ var processRemotes = function(inCache, forUpdate, response) {
             var options = {
                 host: "worldoftanks.ru",
                 port: 80,
-                path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats",
-                method: "GET"
+                path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
             };
 
-            var request = http.request(options, function(res) {
+            var request = http.get(options, function(res) {
                 var responseData = "";
 
                 res.setEncoding("utf8");
@@ -65,14 +64,12 @@ var processRemotes = function(inCache, forUpdate, response) {
                 utils.log("Http error: " + e);
                 callback(e);
             });
-            request.setTimeout(2000);
-            request.on("timeout",  function() {
+            request.setTimeout(2000,  function() {
                 utils.log("Timeout");
-                request.destroy();
+                //request.destroy();
                 callback(true);
             });
             request.shouldKeepAlive = false;
-            request.end();
         };
     });
 

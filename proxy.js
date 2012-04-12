@@ -40,6 +40,12 @@ var processRemotes = function(inCache, forUpdate, response) {
                 path: "/uc/accounts/" + id + "/api/1.2/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
             };
 
+            var reqTimeout = setTimeout(function() {
+                utils.log("Timeout");
+                request.destroy();
+                callback(true);
+            }, 2500);
+
             var request = http.get(options, function(res) {
                 var responseData = "";
 
@@ -49,6 +55,8 @@ var processRemotes = function(inCache, forUpdate, response) {
                 });
                 res.on("end", function() {
                     var result;
+
+                    clearTimeout(reqTimeout);
                     try {
                         result = JSON.parse(responseData);
                     } catch(e) {
@@ -62,11 +70,6 @@ var processRemotes = function(inCache, forUpdate, response) {
 
             request.on("error", function(e) {
                 utils.log("Http error: " + e);
-                callback(e);
-            });
-            request.setTimeout(2000,  function() {
-                utils.log("Timeout");
-                //request.destroy();
                 callback(true);
             });
             request.shouldKeepAlive = false;

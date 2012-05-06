@@ -1,103 +1,100 @@
-var http = require("http"),
-	url = require("url"),
-	async = require("async"),
+﻿var http = require("http"),
+    url = require("url"),
+    async = require("async"),
     utils = require("./utils"),
     mongo = require("mongodb"),
     dbName = "test",
-	collectionName = "test_collection",
+    collectionName = "test_collection",
     cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
     serverOptions = {
         auto_reconnect: true,
         poolSize: 10
     },
-    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
+    db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, serverOptions)),
     collection;
 
+utils.log("Starting server");
+
+// Connect to database
 db.open(function(error, client) {
     if(error) {
         utils.log("DB connection error!");
         return;
     }
 
+    utils.log("MongoDB Connected");
+
     collection = new mongo.Collection(client, collectionName);
 });
 
+// Create http server
 http.createServer(function(request, response) {
-    var query = getQuery(request, response);
-
-    if(!query)
+    // parse request
+    var ids;
+    try {
+        var query = url.parse(request.url).query;
+        if(!query || !query.match(/^((\d)|(\d(\d|,)*\d))$/))
+            throw "query match error: " + query;
+        ids = query.split(",").map(function(a) {
+            return parseInt(a);
+        });
+    } catch(e) {
+        response.statusCode = 500;
+        if(request.url.toLowerCase() == "/favicon.ico")
+            response.end("wrong request: " + e);
+        else
+            response.end("wrong request: " + e + " url=" + request.url);
         return;
+    }
 
-    var ids = [ ],
-        parts = query.split(",");
+    var inCache = [ ],
+        forUpdate = [ ],
+        now = new Date();
 
-    parts.forEach(function(part) {
-        ids.push(parseInt(part));
+    var cursor = collection.find({ id: { $in: ids }});
+    cursor.toArray(function(error, records) {
+        try {
+            if(error)
+                throw "MongoDB find error: " + error;
+
+            inCache = records;
+
+            ids.forEach(function(id) {
+                var found = false;
+                for(var i = 0; i < inCache.length; ++i) {
+                    if(inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if(!found)
+                    forUpdate.push(id);
+            });
+
+            utils.debug("records from cache:  " + inCache.length);
+            utils.debug("records to retrieve: " + forUpdate.length);
+
+            processRemotes(inCache, forUpdate, response);
+        } catch(e) {
+            response.statusCode = 500;
+            response.end("Error: " + e);
+            utils.log("Error: " + e);
+        }
     });
-
-    processLocal(ids, response);
 }).listen(1337, "127.0.0.1");
 
 utils.log("Server running at http://127.0.0.1:1337/");
 
-var getQuery = function(request, response) {
-    var query;
+// DB Functions
 
-    try {
-        query = url.parse(request.url).query;
-    } catch(e) {
-        response.statusCode = 500;
-        response.end("wrong request");
-        utils.log("url.parse error: " + request.url);
-        return false;
-    }
-
-    if(!(query && query.match(/^\d(\d|,)+\d$/))) {
-        response.statusCode = 500;
-        response.end("wrong request");
-        utils.log("query match error: " + query);
-        return false;
-    }
-
-    return query;
-};
-
-var processLocal = function(ids, response) {
-    var inCache = [ ],
-        forUpdate = [ ],
-        checks = [ ],
-        now = new Date();
-
-    ids.forEach(function(id) {
-        checks.push(function(callback) {
-            collection.find({ id: id }, { limit: 1 }).toArray(function(error, records) {
-                if(error) {
-                    callback(error);
-                    return;
-                }
-
-                var playerRecord = records.length && records[0];
-
-                if(playerRecord && (now - playerRecord.date) < cacheTtl)
-                    inCache.push(playerRecord);
-                else
-                    forUpdate.push(id);
-
-                callback(null);
-            });
-        });
-    });
-
-    async.series(checks, function(error) {
-        if(error) {
-            response.statusCode = 500;
-            response.end("DB connection error");
-            utils.log("DB connection error 3");
-            return;
-        }
-        processRemotes(inCache, forUpdate, response);
+var updateDb = function(players) {
+    players.forEach(function(player) {
+        if(player.eff !== "X")
+            collection.update({ id: player.id }, player, { upsert: true });
     });
 };
+
+// WG Server Statistics retrieve
 
 var processRemotes = function(inCache, forUpdate, response) {
     var urls = { };
@@ -146,7 +143,7 @@ var processRemotes = function(inCache, forUpdate, response) {
         };
     });
 
-    async.series(urls, function(err, results) {
+    async.parallel(urls, function(err, results) {
         var result = {
             players: [ ],
             info: {
@@ -156,7 +153,7 @@ var processRemotes = function(inCache, forUpdate, response) {
                 }
             }
         };
-        
+
         var now = new Date();
 
         forUpdate.forEach(function(id) {
@@ -183,12 +180,5 @@ var processRemotes = function(inCache, forUpdate, response) {
         });
 
         response.end(JSON.stringify(result));
-    });
-};
-
-var updateDb = function(players) {
-    players.forEach(function(player) {
-        if(player.eff !== "X")
-            collection.update({ id: player.id }, player, { upsert: true });
     });
 };

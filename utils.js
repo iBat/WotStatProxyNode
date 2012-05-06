@@ -1,4 +1,6 @@
-module.exports = (function() {
+module.exports = (function()
+{
+    // calculateEfficiency
     var calculateEfficiency = function(data) {
         var summary = data.summary,
             battlesCount = summary.battles_count,
@@ -35,12 +37,25 @@ module.exports = (function() {
         }
     };
 
+    // log
     var log = function(str) {
-        console.log(new Date() + " : " + str);
+        var now = new Date();
+        var s = now.getFullYear() + "-" +
+            (now.getMonth() < 9 ? "0" : "") + (now.getMonth() + 1) + "-" +
+            (now.getDate() < 10 ? "0" : "") + now.getDate() + " " +
+            now.toLocaleTimeString();
+        console.log(s + ": " + str);
     };
 
+    // debug
+    var debug = function(str) {
+      log("DEBUG: " + str);
+    };
+
+    // exports
     return {
         calculateEfficiency: calculateEfficiency,
-        log: log
+        log: log,
+        debug: debug
     }
 })();

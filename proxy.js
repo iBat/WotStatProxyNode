@@ -1,16 +1,17 @@
-﻿var http = require("http"),
+var http = require("http"),
     url = require("url"),
     async = require("async"),
     utils = require("./utils"),
     mongo = require("mongodb"),
     dbName = "test",
     collectionName = "test_collection",
-    cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
+    //cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
+    cacheTtl = 24 * 60 * 60 * 1000, // 1 day
     serverOptions = {
         auto_reconnect: true,
         poolSize: 10
     },
-    db = new mongo.Db(dbName, new mongo.Server("127.0.0.1", 27017, serverOptions)),
+    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
     collection;
 
 utils.log("Starting server");
@@ -27,69 +28,11 @@ db.open(function(error, client) {
     collection = new mongo.Collection(client, collectionName);
 });
 
-// Create http server
-http.createServer(function(request, response) {
-    // parse request
-    var ids;
-    try {
-        var query = url.parse(request.url).query;
-        if(!query || !query.match(/^((\d)|(\d(\d|,)*\d))$/))
-            throw "query match error: " + query;
-        ids = query.split(",").map(function(a) {
-            return parseInt(a);
-        });
-    } catch(e) {
-        response.statusCode = 500;
-        if(request.url.toLowerCase() == "/favicon.ico")
-            response.end("wrong request: " + e);
-        else
-            response.end("wrong request: " + e + " url=" + request.url);
-        return;
-    }
-
-    var inCache = [ ],
-        forUpdate = [ ],
-        now = new Date();
-
-    var cursor = collection.find({ id: { $in: ids }});
-    cursor.toArray(function(error, records) {
-        try {
-            if(error)
-                throw "MongoDB find error: " + error;
-
-            inCache = records;
-
-            ids.forEach(function(id) {
-                var found = false;
-                for(var i = 0; i < inCache.length; ++i) {
-                    if(inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if(!found)
-                    forUpdate.push(id);
-            });
-
-            utils.debug("records from cache:  " + inCache.length);
-            utils.debug("records to retrieve: " + forUpdate.length);
-
-            processRemotes(inCache, forUpdate, response);
-        } catch(e) {
-            response.statusCode = 500;
-            response.end("Error: " + e);
-            utils.log("Error: " + e);
-        }
-    });
-}).listen(1337, "127.0.0.1");
-
-utils.log("Server running at http://127.0.0.1:1337/");
-
 // DB Functions
 
 var updateDb = function(players) {
     players.forEach(function(player) {
-        if(player.eff !== "X")
+        if (player.eff !== "X")
             collection.update({ id: player.id }, player, { upsert: true });
     });
 };
@@ -137,6 +80,7 @@ var processRemotes = function(inCache, forUpdate, response) {
 
             request.on("error", function(e) {
                 utils.log("Http error: " + e);
+                clearTimeout(reqTimeout);
                 callback(true);
             });
             request.shouldKeepAlive = false;
@@ -176,9 +120,75 @@ var processRemotes = function(inCache, forUpdate, response) {
         updateDb(result.players);
 
         inCache.forEach(function(player) {
-            result.players.push(player);
+            var skip = false;
+            for (var i = 0; i < result.players.length; ++i) {
+                if (result.players[i].id == player.id) {
+                    if (result.players[i].eff == "X") {
+                        result.players[i] = player;
+                    }
+                    skip = true;
+                    break;
+                }
+            }
+            if (!skip)
+                result.players.push(player);
         });
 
         response.end(JSON.stringify(result));
     });
 };
+
+// Create http server
+http.createServer(function(request, response) {
+    // parse request
+    var ids;
+    try {
+        var query = url.parse(request.url).query;
+        if (!query || !query.match(/^((\d)|(\d(\d|,)*\d))$/))
+          throw "query match error: " + query;
+        var ids = query.split(",").map(function(a) { return parseInt(a); });
+    } catch(e) {
+        response.statusCode = 500;
+        response.end("wrong request: " + e);
+        if (request.url.toLowerCase() != "/favicon.ico")
+            response.end("wrong request: " + e + " url=" + request.url);
+        return;
+    }
+
+    var inCache = [ ],
+        forUpdate = [ ],
+        now = new Date();
+
+    var cursor = collection.find({ id: { $in: ids }});
+    cursor.toArray(function(error, records) {
+        try {
+            if (error)
+                throw "MongoDB find error: " + error;
+
+            inCache = records;
+
+            ids.forEach(function(id) {
+                var found = false;
+                for (var i = 0; i < inCache.length; ++i) {
+                    if (inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    forUpdate.push(id);
+            });
+
+//            utils.debug("records from cache:  " + inCache.length);
+//            utils.debug("records to retrieve: " + forUpdate.length);
+
+            processRemotes(inCache, forUpdate, response);
+        } catch(e) {
+            response.statusCode = 500;
+            response.end("Error: " + e);
+            utils.log("Error: " + e);
+        }
+    });
+}).listen(1337, "127.0.0.1");
+
+utils.log("Server running at http://127.0.0.1:1337/");

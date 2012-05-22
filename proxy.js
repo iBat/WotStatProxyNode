@@ -5,8 +5,9 @@ var http = require("http"),
     mongo = require("mongodb"),
     dbName = "test",
     collectionName = "test_collection",
-    //cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
-    cacheTtl = 24 * 60 * 60 * 1000, // 1 day
+    statHost = "worldoftanks.ru",
+    cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
+    lastErrorTtl = 30 * 1000, // 30 sec
     serverOptions = {
         auto_reconnect: true,
         poolSize: 10
@@ -32,31 +33,44 @@ db.open(function(error, client) {
 
 var updateDb = function(players) {
     players.forEach(function(player) {
-        if (player.eff !== "X")
+        if(player.eff !== "X")
             collection.update({ id: player.id }, player, { upsert: true });
     });
 };
 
 // WG Server Statistics retrieve
 
-var processRemotes = function(inCache, forUpdate, response) {
+var processRemotes = function(inCache, forUpdate, response, lastError) {
     var urls = { };
 
     forUpdate.forEach(function(id) {
         urls[id] = function(callback) {
+            var now = new Date();
+
+            if ((now - lastError) < lastErrorTtl)
+            {
+                utils.debug("waiting " + Math.round((lastErrorTtl - (now - lastError)) / 1000) + " s");
+                callback(null, []);
+                return;
+            }
+
             var options = {
-                host: "worldoftanks.ru",
+                host: statHost,
                 port: 80,
                 path: "/uc/accounts/" + id + "/api/1.3/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
             };
-
             var reqTimeout = setTimeout(function() {
                 utils.log("Timeout");
-                request.destroy();
-                callback(true);
-            }, 2500);
+                try {
+                    collection.update({ lastError: 1 }, { lastError:1, date:new Date() }, { upsert: true });
+                } catch (e) {
+                    utils.log("Error: " + e);
+                }
 
-            var request = http.get(options, function(res) {
+                callback(true);
+            }, 5000);
+
+            request = http.get(options, function(res) {
                 var responseData = "";
 
                 res.setEncoding("utf8");
@@ -81,6 +95,7 @@ var processRemotes = function(inCache, forUpdate, response) {
             request.on("error", function(e) {
                 utils.log("Http error: " + e);
                 clearTimeout(reqTimeout);
+                collection.update({ lastError: 1 }, {lastError:1, date:new Date()}, { upsert: true });
                 callback(true);
             });
             request.shouldKeepAlive = false;
@@ -144,50 +159,66 @@ http.createServer(function(request, response) {
     var ids;
     try {
         var query = url.parse(request.url).query;
-        if (!query || !query.match(/^((\d)|(\d(\d|,)*\d))$/))
-          throw "query match error: " + query;
-        var ids = query.split(",").map(function(a) { return parseInt(a); });
+
+        if(!query || !query.match(/^((\d)|(\d(\d|,)*\d))$/))
+            throw "query match error: " + query;
+        ids = query.split(",").map(function(id) { return parseInt(id); });
     } catch(e) {
         response.statusCode = 500;
         response.end("wrong request: " + e);
-        if (request.url.toLowerCase() != "/favicon.ico")
+        if(request.url.toLowerCase() != "/favicon.ico")
             response.end("wrong request: " + e + " url=" + request.url);
         return;
     }
 
     var inCache = [ ],
         forUpdate = [ ],
-        now = new Date();
+        now = new Date(),
+        lastError = null;
 
-    var cursor = collection.find({ id: { $in: ids }});
-    cursor.toArray(function(error, records) {
-        try {
-            if (error)
-                throw "MongoDB find error: " + error;
-
-            inCache = records;
-
-            ids.forEach(function(id) {
-                var found = false;
-                for (var i = 0; i < inCache.length; ++i) {
-                    if (inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
-                    forUpdate.push(id);
-            });
-
-//            utils.debug("records from cache:  " + inCache.length);
-//            utils.debug("records to retrieve: " + forUpdate.length);
-
-            processRemotes(inCache, forUpdate, response);
-        } catch(e) {
-            response.statusCode = 500;
-            response.end("Error: " + e);
-            utils.log("Error: " + e);
+    collection.find({ lastError: 1 }, { _id: 0 }).toArray(function(error, records) {
+        if (error)
+            utils.debug("mongo error:  " + error);
+        else if (records.length > 0)
+        {
+            try {
+                lastError = records[0].date;
+            } catch (e) {
+                utils.debug("mongo error 2:  " + e);
+            }
         }
+        utils.debug("last error date:  " + lastError);
+
+        var cursor = collection.find({ id: { $in: ids }}, { _id : 0 });
+        cursor.toArray(function(error, records) {
+            try {
+                if (error)
+                    throw "MongoDB find error: " + error;
+
+                inCache = records;
+
+                ids.forEach(function(id) {
+                    var found = false;
+                    for (var i = 0; i < inCache.length; ++i) {
+                        if (inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                        forUpdate.push(id);
+                });
+
+                utils.debug("records from cache:  " + inCache.length);
+                utils.debug("records to retrieve: " + forUpdate.length);
+
+                processRemotes(inCache, forUpdate, response, lastError);
+            } catch(e) {
+                response.statusCode = 500;
+                response.end("Error: " + e);
+                utils.log("Error: " + e);
+            }
+        });
     });
 }).listen(1337, "127.0.0.1");
 

@@ -101,12 +101,7 @@ var processRemotes = function(inCache, forUpdate, response, lastError) {
     async.parallel(urls, function(err, results) {
         var result = {
             players: [ ],
-            info: {
-                xvm: {
-                    ver: "0.4",
-                    message: "\u00bd + \u00bc = \u00be"
-                }
-            }
+            info: settings.info
         };
 
         var now = new Date();
@@ -207,7 +202,6 @@ http.createServer(function(request, response) {
 
                 utils.debug("records from cache:  " + inCache.length);
                 utils.debug("records to retrieve: " + forUpdate.length);
-
                 processRemotes(inCache, forUpdate, response, lastError);
             } catch(e) {
                 response.statusCode = 500;

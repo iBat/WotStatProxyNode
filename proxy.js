@@ -2,17 +2,13 @@ var http = require("http"),
     url = require("url"),
     async = require("async"),
     utils = require("./utils"),
+    settings = require("./settings"),
     mongo = require("mongodb"),
-    dbName = "test",
-    collectionName = "test_collection",
-    statHost = "worldoftanks.ru",
-    cacheTtl = 7 * 24 * 60 * 60 * 1000, // 7 days
-    lastErrorTtl = 30 * 1000, // 30 sec
     serverOptions = {
         auto_reconnect: true,
         poolSize: 10
     },
-    db = new mongo.Db(dbName, new mongo.Server("localhost", 27017, serverOptions)),
+    db = new mongo.Db(settings.dbName, new mongo.Server("localhost", 27017, serverOptions)),
     collection;
 
 utils.log("Starting server");
@@ -26,7 +22,7 @@ db.open(function(error, client) {
 
     utils.log("MongoDB Connected");
 
-    collection = new mongo.Collection(client, collectionName);
+    collection = new mongo.Collection(client, settings.collectionName);
 });
 
 // DB Functions
@@ -47,24 +43,24 @@ var processRemotes = function(inCache, forUpdate, response, lastError) {
         urls[id] = function(callback) {
             var now = new Date();
 
-            if ((now - lastError) < lastErrorTtl)
+            if ((now - lastError) < settings.lastErrorTtl)
             {
-                utils.debug("waiting " + Math.round((lastErrorTtl - (now - lastError)) / 1000) + " s");
+                utils.debug("waiting " + Math.round((settings.lastErrorTtl - (now - lastError)) / 1000) + " s");
                 callback(null, []);
                 return;
             }
 
             var options = {
-                host: statHost,
+                host: settings.statHost,
                 port: 80,
                 path: "/uc/accounts/" + id + "/api/1.3/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"
             };
             var reqTimeout = setTimeout(function() {
-                utils.log("Timeout");
+                utils.debug("Timeout");
                 try {
                     collection.update({ lastError: 1 }, { lastError:1, date:new Date() }, { upsert: true });
                 } catch (e) {
-                    utils.log("Error: " + e);
+                    utils.debug("Error: " + e);
                 }
 
                 callback(true);
@@ -84,8 +80,8 @@ var processRemotes = function(inCache, forUpdate, response, lastError) {
                     try {
                         result = JSON.parse(responseData);
                     } catch(e) {
-                        utils.log(e);
-                        utils.log("JSON.parse error: " + responseData);
+                        utils.debug(e);
+                        utils.debug("JSON.parse error: " + responseData);
                         callback(e);
                     }
                     callback(null, result);
@@ -93,7 +89,7 @@ var processRemotes = function(inCache, forUpdate, response, lastError) {
             });
 
             request.on("error", function(e) {
-                utils.log("Http error: " + e);
+                utils.debug("Http error: " + e);
                 clearTimeout(reqTimeout);
                 collection.update({ lastError: 1 }, {lastError:1, date:new Date()}, { upsert: true });
                 callback(true);
@@ -200,7 +196,7 @@ http.createServer(function(request, response) {
                 ids.forEach(function(id) {
                     var found = false;
                     for (var i = 0; i < inCache.length; ++i) {
-                        if (inCache[i].id == id && ((now - inCache[i].date) < cacheTtl)) {
+                        if (inCache[i].id == id && ((now - inCache[i].date) < settings.cacheTtl)) {
                             found = true;
                             break;
                         }
@@ -216,10 +212,10 @@ http.createServer(function(request, response) {
             } catch(e) {
                 response.statusCode = 500;
                 response.end("Error: " + e);
-                utils.log("Error: " + e);
+                utils.debug("Error: " + e);
             }
         });
     });
-}).listen(1337, "127.0.0.1");
+}).listen(settings.port, "127.0.0.1");
 
-utils.log("Server running at http://127.0.0.1:1337/");
+utils.log("Server running at http://127.0.0.1:" + settings.port + "/");

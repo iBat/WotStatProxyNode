@@ -49,7 +49,7 @@ module.exports = (function()
 
     // debug
     var debug = function(str) {
-      log("DEBUG: " + str);
+        //log("DEBUG: " + str);
     };
 
     // exports

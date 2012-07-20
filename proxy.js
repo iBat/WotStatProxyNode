@@ -1,314 +1,78 @@
-var http = require("http"),
-    url = require("url"),
-    async = require("async"),
+var cluster = require('cluster'),
+    worker = require("./worker");
+
+// Create cluster
+if (!cluster.isMaster) {
+    worker.createWorker();
+    return;
+}
+
+//////////////////////////////
+// Master thread
+
+var numCPUs = require('os').cpus().length,
     utils = require("./utils"),
-    settings = require("./settings"),
-    mongo = require("mongodb"),
-    collection,
-    missed_collection,
-    serverOptions = {
-        auto_reconnect: true,
-        poolSize: 100
-    },
-    db = new mongo.Db(settings.dbName, new mongo.Server("localhost", 27017, serverOptions));
+    settings = require("./settings");
 
-// Global vars
-var lastErrors = {},
-    waiting_shown = false,
-    error_shown = false;
-
-
-// Main
+// String.lpad
+String.prototype.lpad = function(padString, length) {
+    var str = this;
+    while (str.length < length)
+        str = padString + str;
+    return str;
+}
 
 utils.log("Starting server");
 
-// Set max client connections (5 by default)
-http.globalAgent.maxSockets = settings.maxSockets;
-
-var getStatHostId = function(id) {
-    return Math.max(0, Math.min(Math.floor(id / 500000000), settings.statHosts.length - 1));
-}
-
-// Connect to database
-db.open(function(error, client) {
-    if(error) {
-        utils.log("DB connection error!");
-        return;
-    }
-    utils.log("MongoDB Connected");
-    collection = new mongo.Collection(client, settings.collectionName);
-    missed_collection = new mongo.Collection(client, settings.missedCollectionName);
-});
-
-// WG Server Statistics retrieve
-
-// execute request for single player id
-var makeSingleRequest = function(id, callback, force) {
-    var now = new Date();
-    var statHostId = getStatHostId(id);
-    var lastError = lastErrors["s" + statHostId] || null;
-
-    // Do not execute requests some time after error responce
-    if (lastError != null && ! force) {
-        if ((now - lastError) < settings.lastErrorTtl) {
-            if (!waiting_shown) {
-                waiting_shown = true;
-                utils.debug("waiting " + Math.round((settings.lastErrorTtl - (now - lastError)) / 1000) + " s id=" + id);
-            }
-            callback(null, null);
-            return;
-         } else {
-            lastErrors["s" + statHostId] = null;
-            waiting_shown = false;
-            error_shown = false;
-         }
-    }
-
-    // Select proper server by player id
-    if (statHostId >= settings.statHosts.length) {
-        callback(null, null);
-        return;
-    }
-
-    var options = {
-        host: settings.statHosts[statHostId],
-        port: 80,
-        path: "/uc/accounts/" + id + "/api/" + settings.wotApiVersion + "/?source_token=Intellect_Soft-WoT_Mobile-unofficial_stats"//,
- //       agent: agent
-    };
-
-    var reqTimeout = setTimeout(function() {
-        callback(null, {__error:"Timeout"});
-     }, settings.statHostsTimeouts[statHostId]);
-
-    var request = http.get(options, function(res) {
-        var responseData = "";
-        res.setEncoding("utf8");
-        res.on("data", function(chunk) {
-            responseData += chunk;
-        });
-        res.on("end", function() {
-            clearTimeout(reqTimeout);
-            try {
-                var result = JSON.parse(responseData);
-//                utils.debug("responseData.length = " + responseData.length);
-                callback(null, result);
-            } catch(e) {
-                utils.debug("JSON.parse error: length=" + responseData.length);
-                callback(null, {__error:"JSON.parse error"});
-            }
-        });
-    });
-    request.on("error", function(e) {
-        clearTimeout(reqTimeout);
-        callback(null, {__error:"Http error: " + e});
-    });
-
-    request.shouldKeepAlive = false;
-}
-
-var processRemotes = function(inCache, forUpdate, forUpdateVNames, response) {
-    var urls = { };
-
-    forUpdate.forEach(function(id) {
-        urls[id] = function(callback) {
-            makeSingleRequest(id, callback, forUpdate.length == 1);
-        };
-    });
-
-//    async.series(urls, function(err, results) {
-    async.parallel(urls, function(err, results) {
-
-        var now = new Date();
-
-        var result = {
-            players: [ ],
-            info: settings.info
-        };
-
-        // process retrieved items
-        var updated = 0;
-        for (var i = 0; i < forUpdate.length; ++i) {
-            var id = forUpdate[i];
-            var vname = forUpdateVNames[i];
-
-            var curResult = results[id];
-            var resultItem = { id: id, status: "fail", date: now, vname: vname };
-
-            if (curResult)
-            {
-                if (curResult.__error) {
-                    resultItem.status = "error";
-                    lastErrors["s" + getStatHostId(id)] = now;
-                    if (!error_shown) {
-                         error_shown = true;
-                         utils.debug("Server_" + getStatHostId(id) + ": " + curResult.__error);
-                    }
-                } else if (curResult.status === "ok" && curResult.status_code === "NO_ERROR") {
-                    // fill global info
-                    resultItem.status = "ok";
-                    resultItem.name = curResult.data.name;
-                    resultItem.battles = curResult.data.summary.battles_count;
-                    resultItem.wins = curResult.data.summary.wins;
-                    resultItem.eff = utils.calculateEfficiency(curResult.data);
-
-                    // fill vehicle data
-                    resultItem.v = [];
-                    for (var j = 0; j < curResult.data.vehicles.length; ++j) {
-                        var vdata = curResult.data.vehicles[j];
-                        resultItem.v.push({
-                            name: vdata.name,
-                            l: vdata.level,
-                            b: vdata.battle_count,
-                            w: vdata.win_count,
-                            s: vdata.spotted,
-                            d: vdata.damageDealt,
-                            //survivedBattles: vdata.survivedBattles,
-                            f: vdata.frags//,
-                            //cl: vdata.class
-                        });
-                    }
-
-                    // updating db
-                    collection.update({ id: id }, resultItem, { upsert: true });
-                    updated++;
-                }
-            }
-
-            result.players.push(resultItem);
-        }
-        //utils.debug("updated: " + updated + " / " + forUpdate.length);
-
-        // add cached items and set expired data for players with error stat
-        inCache.forEach(function(player) {
-            var skip = false;
-            for (var i = 0; i < result.players.length; ++i) {
-                if (result.players[i].id == player.id) {
-                    if (result.players[i].status != "ok") {
-                        result.players[i] = player;
-                    }
-                    skip = true;
-                    break;
-                }
-            }
-            if (!skip)
-                result.players.push(player);
-        });
-
-        // print debug info & remove useless data from result
-        var missed_count = 0;
-        var missed_ids = [];
-        result.players.forEach(function(player) {
-            if (player.status != "ok") {
-                if (missed_count < 5)
-                  missed_ids.push(player.id);
-                missed_count++;
-                missed_collection.update({ id: player.id }, { id: player.id }, { upsert: true });
-            } else {
-                // Return only one vehicle data
-                if (player.v)
-                {
-                    var vs = player.v;
-                    delete player.v;
-                    if (player.vname) {
-                        for (var i = 0; i < vs.length; ++i) {
-                            if (vs[i].name.toUpperCase() == player.vname)
-                            {
-                                player.v = vs[i];
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        if (missed_count > 0 && result.players.length > 1) {
-            utils.debug("total: " + (result.players.length < 10 ? " " : "") + result.players.length +
-                "   cache: " + (inCache.length < 10 ? " " : "") + inCache.length +
-                "   retrieve: " + (forUpdate.length < 10 ? " " : "") + forUpdate.length +
-                "   missed: " + (missed_count < 10 ? " " : "") + missed_count +
-                (missed_count > 0 ? ". ids: " : "") + missed_ids.join(",") + (missed_count > 5 ? ",..." : ""));
-        }
-
-        // return response to client
-        response.end(JSON.stringify(result));
-    });
+var usageStat = {
+    start: new Date(),
+    requests: 0,
+    players: 0,
+    cached: 0,
+    updated: 0,
+    missed: 0,
+    updatesFailed: 0,
+    connections: [],
+    maxConnections: []
 };
 
-// Create http server
+    // Fork workers.
+for (var i = 0; i < /*numCPUs*/ 1; i++) {
+    var w = cluster.fork();
 
-http.createServer(function(request, response) {
-    // parse request
-    var ids = [ ];
-    var vehicles = [ ];
-    try {
-        var query = url.parse(request.url).query;
-        if(!query || !query.match(/^((\d)|(\d[\dA-Z_\-,=]*))$/))
-            throw "query match error: " + query;
-
-        if (query == "001" || query == "test") {
-            response.end('{"players":[{"id":1,"status":"ok"}]}');
-            return;
-        }
-
-        ids = query.split(",").map(function(id) { return parseInt(id.split("=")[0]); });
-        vehicles = query.split(",").map(function(id) { return id.split("=")[1]; });
-    } catch(e) {
-        response.statusCode = 500;
-        var errText = "wrong request: " + e;
-        if (request.url.toLowerCase() != "/favicon.ico")
-            errText += " url=" + request.url;
-        response.end(errText);
-        return;
-    }
-
-    // Select required data from cache
-    var cursor = collection.find({ id: { $in: ids }}, { _id:0, id:1, status:1, date:1, name:1, battles:1, wins:1, eff:1, v:1 });
-    cursor.toArray(function(error, inCache) {
-        try {
-            if (error)
-                throw "MongoDB find error: " + error;
-
-            var forUpdate = [ ];
-            var forUpdateVNames = [ ];
-            var now = new Date();
-
-            for (var a = 0; a < ids.length; ++a) {
-                var id = ids[a];
-                var vname = vehicles[a] ? vehicles[a].toUpperCase() : null;
-//if (!vname)
-//{
-//    utils.debug("a:" + a);
-//    utils.debug("ids:" + ids.join(","));
-//    utils.debug("vehicles:" + vehicles.join(","));
-//    utils.debug("query: " + url.parse(request.url).query);
-//}
-                // Check cache data
-                var found = false;
-                for (var i = 0; i < inCache.length; ++i) {
-                    if (inCache[i].id != id)
-                        continue;
-                    if (vname)
-                        inCache[i].vname = vname;
-                    if ((now - inCache[i].date) < settings.cacheTtl)
-                        found = true;
-                    break;
-                }
-
-                // Add missed or expired ids for update
-                if (!found) {
-                    forUpdate.push(id);
-                    forUpdateVNames.push(vname);
-                }
+    w.on('message', function(msg) {
+        if (msg.usage == 1) {
+            if (msg.requests) usageStat.requests += msg.requests;
+            if (msg.players) usageStat.players += msg.players;
+            if (msg.cached) usageStat.cached += msg.cached;
+            if (msg.updated) usageStat.updated += msg.updated;
+            if (msg.missed) usageStat.missed += msg.missed;
+            if (msg.updatesFailed) usageStat.updatesFailed += msg.updatesFailed;
+            if (msg.connections) usageStat.connections[msg.hostId] = (usageStat.connections[msg.hostId] || 0) + msg.connections;
+            if (msg.maxConnections && usageStat.maxConnections[msg.hostId] != msg.maxConnections) {
+                usageStat.maxConnections[msg.hostId] = msg.maxConnections;
+//                utils.log("> connections limits: [" + usageStat.maxConnections.join(", ") + "]");
             }
-
-            processRemotes(inCache, forUpdate, forUpdateVNames, response);
-        } catch(e) {
-            response.statusCode = 500;
-            response.end("Error: " + e);
-            utils.debug("Error: " + e);
+        } else if (msg.cmd == "cmd") {
+            //w.send({ chat: 'Ok worker, Master got the message! Over and out!' });
         }
     });
-}).listen(settings.port, settings.host);
+}
 
-utils.log("Server running at http://" + settings.host + ":" + settings.port + "/");
+// show usage stat
+setInterval(function() {
+    var uptime = Math.round((new Date() - usageStat.start) / 1000);
+    var d = parseInt(uptime / (60 * 60 * 24));
+    var h = String(parseInt((uptime / 3600) % 24)).lpad("0", 2);
+    var m = String(parseInt((uptime / 60) % 60)).lpad("0", 2);
+    utils.log("> uptime  requests  rq/s   players  pl/s  cached updated  missed updfail connections/limits");
+    utils.log(">" +
+        ((d == 0 ? "" : d + "d") + h + "h" + m).lpad(" ", 7) +
+        String(usageStat.requests).lpad(" ", 10) + " " + (usageStat.requests / uptime).toFixed().lpad(" ", 5) +
+        String(usageStat.players).lpad(" ", 10) + " " + (usageStat.players / uptime).toFixed().lpad(" ", 5) +
+        ((usageStat.cached / usageStat.players * 100).toFixed(2) + "%").lpad(" ", 8) +
+        ((usageStat.updated / usageStat.players * 100).toFixed(2) + "%").lpad(" ", 8) +
+        ((usageStat.missed / usageStat.players * 100).toFixed(2) + "%").lpad(" ", 8) +
+        ((usageStat.updatesFailed / usageStat.players * 100).toFixed(2) + "%").lpad(" ", 8) +
+        " [" + usageStat.connections.join(", ") + "]/[" + usageStat.maxConnections.join(", ") + "]");
+}, settings.usageStatShowPeriod);

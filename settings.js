@@ -7,17 +7,20 @@ module.exports = (function()
         port: 1333,
         maxSockets: 1000, // per client
         cacheTtl: 3 * 24 * 60 * 60 * 1000, // in msec
-        lastErrorTtl: 2 * 1000, // in msec
+        lastErrorTtl: 3 * 1000, // in msec
+        usageStatShowPeriod: 20 * 1000, // in msec
         dbName: "xvm",
         collectionName: "players",
         missedCollectionName: "missed",
+        usersCollectionName: "users",
+        statHostMaxConnections: 100,
         statHosts: [
-            "worldoftanks.ru",      // RU:            0 ..  499999999
-            "worldoftanks.eu",      // EU:    500000000 ..  999999999
-            "worldoftanks.com",     // NA:   1000000000 .. 1499999999
-            "worldoftanks-sea.com", // ???: 15000000000 .. 1999999999
-            "worldoftanks-sea.com", // SEA: 20000000000 .. 2499999999
-            "wot.go.vn"             // VTC: 25000000000 .. 2999999999
+            "worldoftanks.ru",      // RU:           0 ..  49999999
+            "worldoftanks.eu",      // EU:    50000000 ..  99999999
+            "worldoftanks.com",     // NA:   100000000 .. 149999999
+            "worldoftanks-sea.com", // ???: 1500000000 .. 199999999
+            "worldoftanks-sea.com", // SEA: 2000000000 .. 249999999
+            "wot.go.vn"             // VTC: 2500000000 .. 299999999
         ],
         statHostsTimeouts: [
             5000,      // RU
@@ -29,10 +32,7 @@ module.exports = (function()
         ],
         wotApiVersion: "1.5",
         info: {
-            xvm: {
-                ver: "2.4.1",
-                message: ""
-            },
+            xvm: { ver: "2.4.1", message: "" },
             RU: {
                 ver: "2.4.1",
                 message: [
@@ -58,26 +58,9 @@ module.exports = (function()
                     "  * added per-vehicle statistics"
                 ].join("\n")
             },
-            SEA: {
-                ver: "2.3",
-                message: [
-//                    "  * adaptation to WoT 0.7.4",
-//                    "  * new proxy server",
-//                    "  * added per-vehicle statistics"
-                ].join("\n")
-            },
-            VTC: {
-                ver: "2.3",
-                message: [
-//                    "  * adaptation to WoT 0.7.4",
-//                    "  * new proxy server",
-//                    "  * added per-vehicle statistics"
-                ].join("\n")
-            },
-            CT: {
-                ver: "2.4.1",
-                message: ""
-            }
+            SEA: { ver: "2.4.1", message: "" },
+            VTC: { ver: "2.4.1", message: "" },
+            CT: {  ver: "2.4.1", message: "" }
         }
     }
 })();
